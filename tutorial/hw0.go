@@ -10,7 +10,7 @@ import (
 )
 
 var idAssignmentChan = make(chan string)
-var client_id_to_stream = make(map[string] net.Conn)
+// var client_id_to_stream = make(map[string] net.Conn)
 var clientIdToChannel = make(map[string] chan string)
 var clientIdToChannelTest = make(map[string] chan string)
 
@@ -31,7 +31,9 @@ func WriteToAll(content string){
 
 func TalkToSingle(id string, content string) {
     if channel_of_id, exist := clientIdToChannel[id]; exist {
+        // fmt.Println(content + " " + id, " is talking to single")
         channel_of_id <- content
+        // fmt.Println(content + " " + id, " send to single")
     }
 }
 
@@ -41,6 +43,7 @@ func PutIdToQueue(client_id string) {
 
 
 func ParseContent(content string, client_id string) {
+    fmt.Println(content, " is parsing")
     split_content := strings.Split(content, ":")
     command := strings.Trim(split_content[0], " ")
     contentInfo := strings.Trim(strings.Join(split_content[1:], ":"), " ")
@@ -61,11 +64,9 @@ func HandleConnection(conn net.Conn) {
     // idQueue <- client_id
     // PutIdToQueue(client_id)
 
-    var channelForId = make(chan string)
-
     // reqrite to assign channel in singel thread
+    var channelForId = make(chan string)
     clientIdToChannel[client_id] = channelForId
-
 
     go Write(conn, client_id)
     for {
@@ -74,9 +75,7 @@ func HandleConnection(conn net.Conn) {
             conn.Close()
             break
         }
-        client_id_to_stream[client_id] = conn
         ParseContent(string(line), client_id)
-
     }
 }
 
@@ -87,17 +86,29 @@ func IdManager() {
     }
 }
 
+// func CreateChannelForId(){
+//     for id:= range idQueue{
+//
+//         // id := <- idQueue
+//
+//         fmt.Println(id, " is assigning")
+//         var channelForId = make(chan string)
+//         channelForId <- (id + " is ready")
+//         clientIdToChannelTest[id] = channelForId
+//     }
+// }
+
 func CreateChannelForId(){
-    for id:= range idQueue{
-
-        // id := <- idQueue
-
-        fmt.Println(id, " is assigning")
+    for {
         var channelForId = make(chan string)
-        channelForId <- (id + " is ready")
-        clientIdToChannelTest[id] = channelForId
+        select {
+        case id := <- idQueue:
+            fmt.Println(id, " is assigning")
+            clientIdToChannelTest[id] = channelForId
+        }
     }
 }
+
 
 func main() {
     if len(os.Args) < 2{
