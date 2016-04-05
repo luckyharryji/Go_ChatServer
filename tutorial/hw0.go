@@ -26,6 +26,8 @@ func ParseContent(content string, client_id string) {
         SendToQueue(client_id + ": chitter: " + client_id + "\r\n")
     case "all":
         SendToQueue("all: " + client_id + ": " + contentInfo)
+    case "close":
+        SendToQueue(content)
     default:
         SendToQueue(command + ": " + client_id + ": " + contentInfo)
     }
@@ -40,6 +42,8 @@ func SendContent(content string) {
         for id := range clientIdToStream {
             clientIdToStream[id].Write([]byte(string(contentInfo)))
         }
+    case "close":
+        delete(clientIdToStream, contentInfo)
     default:
         clientIdToStream[command].Write([]byte(string(contentInfo)))
     }
@@ -52,6 +56,7 @@ func HandleConnectionWithId(conn net.Conn, client_id string) {
         line, err := b.ReadBytes('\n')
         if err != nil {
             conn.Close()
+            ParseContent(string("close: " + client_id), client_id)
             break
         }
         ParseContent(string(line), client_id)
