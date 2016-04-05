@@ -65,6 +65,7 @@ func HandleConnection(conn net.Conn) {
     // PutIdToQueue(client_id)
 
     // reqrite to assign channel in singel thread
+    // rewrite channel
     var channelForId = make(chan string)
     clientIdToChannel[client_id] = channelForId
 
