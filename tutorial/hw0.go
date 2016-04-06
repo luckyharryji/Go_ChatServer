@@ -17,8 +17,8 @@ var clientIdToChannelTest = make(map[string] chan string)
 var idQueue = make(chan string)
 
 
-func Write(conn net.Conn, id string) {
-	for content := range clientIdToChannel[id]{
+func Write(conn net.Conn, id string, private_channel chan string) {
+	for content := range private_channel{
         conn.Write([]byte(string(content)))
 	}
 }
@@ -57,19 +57,10 @@ func ParseContent(content string, client_id string) {
     }
 }
 
-func HandleConnection(conn net.Conn) {
+func HandleConnection(conn net.Conn, client_id string, private_channel chan string) {
     b := bufio.NewReader(conn)
-    client_id := <- idAssignmentChan
 
-    // idQueue <- client_id
-    // PutIdToQueue(client_id)
-
-    // reqrite to assign channel in singel thread
-    // rewrite channel
-    var channelForId = make(chan string)
-    clientIdToChannel[client_id] = channelForId
-
-    go Write(conn, client_id)
+    go Write(conn, client_id, private_channel)
     for {
         line, err := b.ReadBytes('\n')
         if err != nil {
@@ -129,7 +120,10 @@ func main() {
 
     fmt.Println("Listening on port", os.Args[1])
     for{
+        client_id := <- idAssignmentChan
+        var channelForId = make(chan string)
+        clientIdToChannel[client_id] = channelForId
         conn, _ := server.Accept()
-        go HandleConnection(conn)
+        go HandleConnection(conn, client_id, channelForId)
     }
 }
