@@ -9,12 +9,20 @@ import (
     "strings"
 )
 
+type ClientInfo struct {
+    add bool
+    connection net.Conn
+    id string
+}
+
 // channel used for assign cliet id
 var idAssignmentChan = make(chan string)
 // map use to keep track of connection
 var clientIdToStream = make(map[string] net.Conn)
 // channel used to keep the connnt queue for the server
 var contentQueue = make(chan string)
+// channel used to keep track of whether add/delete a connection client in the map
+var clientChnnel = make(chan ClientInfo)
 
 /*
 send the content to the conentQueue
@@ -104,6 +112,30 @@ func IdManager() {
     }
 }
 
+/*
+Decode info in the client information
+*/
+func DecodeClientInfo(clientInfo ClientInfo) {
+    switch clientInfo.add {
+    case true :
+        clientIdToStream[clientInfo.id] = clientInfo.connection
+    default:
+        delete(clientIdToStream, clientInfo.id)
+    }
+}
+
+
+/*
+keep track of whether add or delete client in the map
+*/
+func ClientListener() {
+    for {
+        select {
+        case clientInfo := <- clientChnnel:
+            DecodeClientInfo(clientInfo)
+        }
+    }
+}
 
 func main() {
     if len(os.Args) < 2{
