@@ -78,7 +78,8 @@ func DecodeContent(content string) {
             clientIdToStream[id].Write([]byte(string(contentInfo)))
         }
     case "close":
-        delete(clientIdToStream, contentInfo)
+        // delete(clientIdToStream, contentInfo)
+        DeleteConnetionRequest(contentInfo)
     default:
         if streamOfId, exist := clientIdToStream[command]; exist {
             streamOfId.Write([]byte(string(contentInfo)))
@@ -137,6 +138,16 @@ func ClientListener() {
     }
 }
 
+func AddConnectionRequest(id string, stream net.Conn) {
+    var addRequest = ClientInfo{add: true, connection: stream, id: id }
+    clientChnnel <- addRequest
+}
+
+func DeleteConnetionRequest(id string) {
+    var deleteRequest = ClientInfo {add: false, connection: nil, id: id}
+    clientChnnel <- deleteRequest
+}
+
 func main() {
     if len(os.Args) < 2{
         fmt.Fprintf(os.Stderr, "Usage: chitter <port-number>\n")
@@ -152,6 +163,7 @@ func main() {
 
     go IdManager()
     go SteamListener()
+    go ClientListener()
 
     fmt.Println("Listening on port", os.Args[1])
     for{
@@ -159,7 +171,8 @@ func main() {
         // assign id to each connection
         // also, record the id - connection in the map
         client_id := <- idAssignmentChan
-        clientIdToStream[client_id] = conn
+        AddConnectionRequest(client_id, conn)
+        // clientIdToStream[client_id] = conn
         go HandleConnectionWithId(conn, client_id)
     }
 }
