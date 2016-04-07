@@ -9,68 +9,110 @@ import (
     "strings"
 )
 
+/*
+new structure created for pass message inside the system
+@id:
+    "all": a message will be send to all the connected client
+    default: assigned id for the connected id, send message to it/ delete it/ add it in the map
+@add:
+    "1": a new client come in, record the assigned channel to it in the global map to keep track of
+    "-1": a client lost connection, delete the id - client channel in the map
+    "0": a message will be sent inside the system
+@channel:
+    only valid when record the new connection client,
+    record the channel assign to the client
+@connect:
+    only valid when passing message in the system
+    content to be distributed to the specific id
+*/
+type ClientInfo struct {
+    id string
+    add string
+    channel chan string
+    content string
+}
+
+// channel used for assign cliet id
 var idAssignmentChan = make(chan string)
-// var client_id_to_stream = make(map[string] net.Conn)
+// map use to keep track of channel created for each connection client
 var clientIdToChannel = make(map[string] chan string)
-var clientIdToChannelTest = make(map[string] chan string)
+// channel used to keep track of whether process the message sent by different client
+var clientChnnel = make(chan ClientInfo)
 
-var idQueue = make(chan string)
-
-
-func Write(conn net.Conn, id string, private_channel chan string) {
+/*
+create goroutine for each connected client to listen for message send by self/others
+*/
+func ChannelListenerForClient(conn net.Conn, id string, private_channel chan string) {
 	for content := range private_channel{
         conn.Write([]byte(string(content)))
 	}
 }
 
-func WriteToAll(content string){
+/*
+called when distributed the content to all the connected client
+*/
+func BroadcastToAll(content string){
     for id := range clientIdToChannel {
         clientIdToChannel[id] <- content
     }
 }
 
+/*
+send private message to a single connected client
+if the client id does not existed, do nothing
+*/
 func TalkToSingle(id string, content string) {
     if channel_of_id, exist := clientIdToChannel[id]; exist {
-        // fmt.Println(content + " " + id, " is talking to single")
         channel_of_id <- content
-        // fmt.Println(content + " " + id, " send to single")
     }
 }
 
-func PutIdToQueue(client_id string) {
-    idQueue <- client_id
-}
-
-
-func ParseContent(content string, client_id string) {
-    fmt.Println(content, " is parsing")
+/*
+parse message by each client, to decide the command or where to send the message
+*/
+func ParseContent(content string, clientId string) {
     split_content := strings.Split(content, ":")
-    command := strings.Trim(split_content[0], " ")
-    contentInfo := strings.Trim(strings.Join(split_content[1:], ":"), " ")
+
+    var command, contentInfo string
+    if len(split_content) < 2{
+        // when there is no object assigned
+        // consider it as send message to all
+        command = "all"
+        contentInfo = content
+    } else {
+        command = strings.Trim(split_content[0], " ")
+        contentInfo = strings.Trim(strings.Join(split_content[1:], ":"), " ")
+    }
     switch command {
     case "whoami":
-        TalkToSingle(client_id, "chitter: " + client_id + "\r\n")
+        TalkConnectionRequest(clientId, "chitter: " + clientId + "\r\n")
     case "all":
-        WriteToAll(client_id + ": " + contentInfo)
+        TalkConnectionRequest("all", clientId + ": " + contentInfo)
     default:
-        TalkToSingle(command, client_id + ": " + contentInfo)
+        TalkConnectionRequest(command, clientId + ": " + contentInfo)
     }
 }
 
-func HandleConnection(conn net.Conn, client_id string, private_channel chan string) {
+/*
+each connection/client has own goroutine to keep track of message send by this client
+*/
+func HandleConnection(conn net.Conn, clientId string) {
     b := bufio.NewReader(conn)
-
-    go Write(conn, client_id, private_channel)
     for {
         line, err := b.ReadBytes('\n')
         if err != nil {
             conn.Close()
+            // if the connection is lost, delete its listening channel from global map
+            DeleteConnetionRequest(clientId)
             break
         }
-        ParseContent(string(line), client_id)
+        ParseContent(string(line), clientId)
     }
 }
 
+/*
+goroutine to continuesly assign id to connected client
+*/
 func IdManager() {
     var i uint64
     for i = 0;  ; i++ {
@@ -78,29 +120,67 @@ func IdManager() {
     }
 }
 
-// func CreateChannelForId(){
-//     for id:= range idQueue{
-//
-//         // id := <- idQueue
-//
-//         fmt.Println(id, " is assigning")
-//         var channelForId = make(chan string)
-//         channelForId <- (id + " is ready")
-//         clientIdToChannelTest[id] = channelForId
-//     }
-// }
+/*
+called when a new message need to be passed between the clients
+*/
+func SendMessage(obj string, content string){
+    switch obj {
+    case "all":
+        BroadcastToAll(content)
+    default:
+        TalkToSingle(obj, content)
+    }
+}
 
-func CreateChannelForId(){
+/*
+Decode info in the client information
+*/
+func DecodeClientInfo(clientInfo ClientInfo) {
+    switch clientInfo.add {
+    case "1" :
+        clientIdToChannel[clientInfo.id] = clientInfo.channel
+    case "-1":
+        delete(clientIdToChannel, clientInfo.id)
+    default:
+        SendMessage(clientInfo.id, clientInfo.content)
+    }
+}
+
+/*
+listen message in the channel with ClientInfo, call decode fuction to deal with the message
+*/
+func ClientListener() {
     for {
-        var channelForId = make(chan string)
         select {
-        case id := <- idQueue:
-            fmt.Println(id, " is assigning")
-            clientIdToChannelTest[id] = channelForId
+        case clientInfo := <- clientChnnel:
+            DecodeClientInfo(clientInfo)
         }
     }
 }
 
+/*
+called when new client connected and the channel assigned to it need to be recored in global map
+*/
+func AddConnectionRequest(id string, channel chan string) {
+    var addRequest = ClientInfo{add: "1", channel: channel, id: id, content: ""}
+    clientChnnel <- addRequest
+}
+
+/*
+called when client lost connection and it's channel needs to be deleted from the global map
+*/
+func DeleteConnetionRequest(id string) {
+    var deleteRequest = ClientInfo {add: "-1", channel: nil, id: id, content: ""}
+    clientChnnel <- deleteRequest
+}
+
+/*
+called when a message need to be passed between the clients
+*/
+func TalkConnectionRequest(id string, content string) {
+    var talkRequest = ClientInfo {add: "0", channel: nil, id: id, content: content}
+    clientChnnel <- talkRequest
+}
 
 func main() {
     if len(os.Args) < 2{
@@ -115,15 +195,20 @@ func main() {
         os.Exit(1)
     }
     go IdManager()
-
-    // go CreateChannelForId()
+    // start the goroutine to keep track of the message inside the clientChnnel
+    go ClientListener()
 
     fmt.Println("Listening on port", os.Args[1])
     for{
-        client_id := <- idAssignmentChan
-        var channelForId = make(chan string)
-        clientIdToChannel[client_id] = channelForId
         conn, _ := server.Accept()
-        go HandleConnection(conn, client_id, channelForId)
+        // assign id to the new connection
+        clientId := <- idAssignmentChan
+        // create new channel for each new connection
+        var channelForId = make(chan string)
+        // record the id and the channel for the new connection globally to be scheduled
+        AddConnectionRequest(clientId, channelForId)
+        // create goroutine to keep track of the connection coming info and the channel assigned to it
+        go ChannelListenerForClient(conn, clientId, channelForId)
+        go HandleConnection(conn, clientId)
     }
 }
